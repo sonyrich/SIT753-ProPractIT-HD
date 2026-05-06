@@ -87,7 +87,7 @@ pipeline {
                             -Dsonar.login=%SONAR_TOKEN% ^
                             -Dsonar.projectVersion=%APP_VERSION% ^
                             -Dsonar.sources=src ^
-                            -Dsonar.tests=tests ^
+                            -Dsonar.tests=test ^
                             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info ^
                             -Dsonar.exclusions=node_modules/**,coverage/**,logs/**
                     """
