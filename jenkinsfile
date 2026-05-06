@@ -84,7 +84,7 @@ pipeline {
                             -Dsonar.projectKey=%SONAR_PROJECT% ^
                             -Dsonar.organization=%SONAR_ORG% ^
                             -Dsonar.host.url=https://sonarcloud.io ^
-                            -Dsonar.token=%SONAR_TOKEN% ^
+                            -Dsonar.login=%SONAR_TOKEN% ^
                             -Dsonar.projectVersion=%APP_VERSION% ^
                             -Dsonar.sources=src ^
                             -Dsonar.tests=test ^
@@ -210,12 +210,7 @@ pipeline {
             echo "Result      : ${currentBuild.currentResult}"
             echo "Duration    : ${currentBuild.durationString}"
             echo "========================================"
-
-            // Stop background Node.js processes on staging and production ports
-            bat "FOR /F \"tokens=5\" %P IN ('netstat -ano ^| findstr :${STAGING_PORT} ^| findstr LISTENING') DO taskkill /F /PID %P || echo No process on port ${STAGING_PORT}"
-            bat "FOR /F \"tokens=5\" %P IN ('netstat -ano ^| findstr :${APP_PORT} ^| findstr LISTENING') DO taskkill /F /PID %P || echo No process on port ${APP_PORT}"
-
-        cleanWs()
+            cleanWs()
         }
         success {
             echo "All 7 pipeline stages completed successfully."
