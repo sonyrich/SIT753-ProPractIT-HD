@@ -19,7 +19,9 @@ app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  limit: 100,           // 'max' was renamed to 'limit' in v8
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' }
 });
 app.use('/api/', limiter);
