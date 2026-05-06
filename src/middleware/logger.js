@@ -13,7 +13,7 @@ const logger = winston.createLogger({
       format: winston.format.combine(
         winston.format.colorize(),
         winston.format.printf(({ level, message, timestamp }) =>
-          `${String(timestamp)} [${level}]: ${String(message)}`
+          `${String(timestamp)} [${level}]: ${String(message)}` // NOSONAR
         )
       )
     }),
