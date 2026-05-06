@@ -35,7 +35,10 @@ pipeline {
                 echo "Build artefact: Node.js application ready for deployment."
             }
             post {
-                success { echo "BUILD STAGE: PASSED" }
+                success {
+                    archiveArtifacts artifacts: 'package.json,src/**/*.js', fingerprint: true
+                    echo "BUILD STAGE: PASSED"
+                }
                 failure { echo "BUILD STAGE: FAILED" }
             }
         }
@@ -128,7 +131,9 @@ pipeline {
             steps {
                 echo "=== DEPLOY STAGE (Staging) ==="
                 echo "Deploying application to staging environment on port ${STAGING_PORT}..."
-
+                echo "Environment config: .env.staging (NODE_ENV=staging, LOG_LEVEL=debug)"
+                
+                bat "copy .env.staging .env"
                 // Start the app in the background on staging port
                 bat "set PORT=${STAGING_PORT} && start /B node src/app.js"
 
@@ -160,11 +165,16 @@ pipeline {
 
                 echo "Release v${APP_VERSION} tagged in repository."
                 echo "Promoting application to production on port ${APP_PORT}..."
+                echo "Environment config: .env.production (NODE_ENV=production, LOG_LEVEL=warn)"
 
+                bat "copy .env.production .env"
+                // Start the app in the background on production port
                 bat "set PORT=${APP_PORT} && start /B node src/app.js"
 
+                // Wait for the process to initialise
                 bat 'ping -n 8 127.0.0.1 > nul'
 
+                // Health check against production port
                 bat "curl -s -o nul -w \"HTTP Status: %%{http_code}\" http://localhost:${APP_PORT}/health/ready"
 
                 echo "Application live at: http://localhost:${APP_PORT}"
