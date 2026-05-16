@@ -168,7 +168,8 @@ pipeline {
                 sh 'sleep 10'
 
                 // Health check against staging port
-                sh "curl -s -o /dev/null -w 'HTTP Status: %{http_code}' http://localhost:${STAGING_PORT}/health/ready"
+                // Deploy stage health check (staging - container name is taskmanager-staging ✅ already correct)
+                sh "docker exec taskmanager-staging node -e \"require('http').get('http://localhost:3000/health/ready', r => { console.log('HTTP Status: ' + r.statusCode); process.exit(r.statusCode === 200 ? 0 : 1) })\""
 
                 echo "Application deployed to staging: http://localhost:${STAGING_PORT}"
             }
@@ -212,13 +213,13 @@ pipeline {
                 sh "docker compose -f docker-compose.production.yml down || true"
 
                 // Deploy fresh production container
-                sh "docker compose -f docker-compose.production.yml up -d --build"
+                sh "WORKSPACE=\$(pwd) docker compose -f docker-compose.production.yml up -d --build"
 
                 // Wait for the process to initialise
-                sh 'sleep 10'
+                sh 'sleep 15'
 
                 // Health check against production port
-                sh "curl -s -o /dev/null -w 'HTTP Status: %{http_code}' http://localhost:${APP_PORT}/health/ready"
+                sh "docker exec taskmanager-production node -e \"require('http').get('http://localhost:3000/health/ready', r => { console.log('HTTP Status: ' + r.statusCode); process.exit(r.statusCode === 200 ? 0 : 1) })\""
 
                 echo "Application live at: http://localhost:${APP_PORT}"
             }
@@ -235,30 +236,19 @@ pipeline {
             steps {
                 echo "=== MONITORING AND ALERTING STAGE ==="
                 echo "Verifying production health metrics..."
-
-                // Check 1: Basic health endpoint
-                sh "curl -sf http://localhost:${APP_PORT}/health || error('Health endpoint failed')"
-
+                
+                // Check 1: Basic health + live metrics
+                sh "docker exec taskmanager-production node -e \"require('http').get('http://localhost:3000/health', r => { let d=''; r.on('data',c=>d+=c); r.on('end',()=>{ console.log('--- Live Metrics ---'); console.log(d); }); process.exit(r.statusCode===200?0:1) })\""
+                
                 // Check 2: Readiness probe
-                sh "curl -sf http://localhost:${APP_PORT}/health/ready || error('Readiness probe failed')"
+                sh "docker exec taskmanager-production node -e \"require('http').get('http://localhost:3000/health/ready', r => { console.log('Readiness HTTP Status: ' + r.statusCode); process.exit(r.statusCode===200?0:1) })\""
 
-                // Check 3: Parse and print live metrics
-                sh """
-                    echo '--- Live Metrics ---'
-                    curl -s http://localhost:${APP_PORT}/health | grep -E 'uptime|memory|status|tasks' || true
-                """
+                // Check 3: Incident simulation - 404 handling
+                sh "docker exec taskmanager-production node -e \"require('http').get('http://localhost:3000/nonexistent', r => { console.log('Incident simulation - response: ' + r.statusCode); if(r.statusCode===404){ console.log('ALERT CHECK PASSED: App correctly returned 404 - incident handling verified.') } })\""
 
-                // Check 4: Incident simulation - verify 404 handling
-                sh """
-                    STATUS=\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:${APP_PORT}/nonexistent)
-                    echo "Incident simulation - 404 response: \$STATUS"
-                    if [ "\$STATUS" = "404" ]; then
-                        echo "ALERT CHECK PASSED: App correctly returned 404 - incident handling verified."
-                    fi
-                """
-
-                echo "Prometheus scrape target: http://localhost:${APP_PORT}/health"
-                echo "Recommended next step: Grafana alert rule on uptime drop or memory > 80%."
+                echo "Prometheus scraping: http://taskmanager-prod:3000/health (Docker service DNS)"
+                echo "Grafana dashboard: http://localhost:3002 (admin / admin123)"
+                echo "Alert rules recommended: uptime drop, memory > 80%, response time > 2s"
             }
             post {
                 success { echo "MONITORING STAGE: PASSED - Live metrics verified, incident simulation complete." }
