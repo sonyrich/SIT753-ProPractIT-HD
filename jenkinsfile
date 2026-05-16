@@ -19,6 +19,26 @@ pipeline {
     stages {
 
         // ---------------------------------------------------------
+        // STAGE 0: CHECKOUT
+        // ---------------------------------------------------------
+        stage('Checkout') {
+            steps {
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    extensions: [
+                        [$class: 'CloneOption', depth: 0, shallow: false, noTags: false]
+                    ],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/sonyrich/SIT753-ProPractIT-HD.git',
+                        credentialsId: 'GITHUB_CREDENTIALS'
+                    ]]
+                ])
+                echo "Repository checked out with full git history."
+            }
+        }
+
+        // ---------------------------------------------------------
         // STAGE 1: BUILD
         // ---------------------------------------------------------
         stage('Build') {
@@ -29,10 +49,13 @@ pipeline {
                 echo "Branch      : ${GIT_BRANCH}"
                 echo "Build No.   : ${BUILD_NUMBER}"
 
-                bat 'npm ci'
+                sh 'npm ci'
 
-                echo "Dependencies installed successfully."
-                echo "Build artefact: Node.js application ready for deployment."
+                // Build and tag Docker image with version
+                sh "docker build -t ${APP_NAME}:${APP_VERSION} -t ${APP_NAME}:latest ."
+
+                echo "Docker image built: ${APP_NAME}:${APP_VERSION}"
+                echo "Build artefact: Node.js application + Docker image ready for deployment."
             }
             post {
                 success {
@@ -51,7 +74,7 @@ pipeline {
                 echo "=== TEST STAGE ==="
                 echo "Running unit and integration tests with Jest..."
 
-                bat 'npm test'
+                sh 'npm test'
             }
             post {
                 always {
@@ -82,16 +105,16 @@ pipeline {
                 echo "Running SonarCloud static analysis..."
 
                 withCredentials([string(credentialsId: 'SONARTOKEN', variable: 'SONAR_TOKEN')]) {
-                    bat """
-                        sonar-scanner ^
-                            -Dsonar.projectKey=%SONAR_PROJECT% ^
-                            -Dsonar.organization=%SONAR_ORG% ^
-                            -Dsonar.host.url=https://sonarcloud.io ^
-                            -Dsonar.token=%SONAR_TOKEN% ^
-                            -Dsonar.projectVersion=%APP_VERSION% ^
-                            -Dsonar.sources=src ^
-                            -Dsonar.tests=test ^
-                            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info ^
+                    sh """
+                        sonar-scanner \\
+                            -Dsonar.projectKey=${SONAR_PROJECT} \\
+                            -Dsonar.organization=${SONAR_ORG} \\
+                            -Dsonar.host.url=https://sonarcloud.io \\
+                            -Dsonar.token=${SONAR_TOKEN} \\
+                            -Dsonar.projectVersion=${APP_VERSION} \\
+                            -Dsonar.sources=src \\
+                            -Dsonar.tests=test \\
+                            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
                             -Dsonar.exclusions=node_modules/**,coverage/**,logs/**
                     """
                 }
@@ -112,7 +135,7 @@ pipeline {
                 echo "=== SECURITY STAGE ==="
                 echo "Running npm audit for known vulnerabilities..."
 
-                bat 'npm audit --audit-level=moderate || exit /b 0'
+                sh 'npm audit --audit-level=moderate || true'
 
                 echo "Security scan complete."
                 echo "Note: ip-address transitive vulnerability (GHSA-v2v4-37r5-5v8g) patched via npm overrides field in package.json."
@@ -132,16 +155,20 @@ pipeline {
                 echo "=== DEPLOY STAGE (Staging) ==="
                 echo "Deploying application to staging environment on port ${STAGING_PORT}..."
                 echo "Environment config: .env.staging (NODE_ENV=staging, LOG_LEVEL=debug)"
-                
-                bat "copy .env.staging .env"
-                // Start the app in the background on staging port
-                bat "set PORT=${STAGING_PORT} && start /B node src/app.js"
+
+                sh "cp .env.staging .env"
+
+                // Tear down any existing staging container (rollback safety)
+                sh "docker compose -f docker-compose.staging.yml down || true"
+
+                // Deploy fresh staging container
+                sh "docker compose -f docker-compose.staging.yml up -d --build"
 
                 // Wait for the process to initialise
-                bat 'ping -n 8 127.0.0.1 > nul'
+                sh 'sleep 10'
 
                 // Health check against staging port
-                bat "curl -s -o nul -w \"HTTP Status: %%{http_code}\" http://localhost:${STAGING_PORT}/health/ready"
+                sh "curl -s -o /dev/null -w 'HTTP Status: %{http_code}' http://localhost:${STAGING_PORT}/health/ready"
 
                 echo "Application deployed to staging: http://localhost:${STAGING_PORT}"
             }
@@ -159,28 +186,44 @@ pipeline {
                 echo "=== RELEASE STAGE ==="
                 echo "Tagging release version: v${APP_VERSION}"
 
-                bat "git config user.email \"jenkins@ci.local\""
-                bat "git config user.name \"Jenkins CI\""
-                bat "git tag v${APP_VERSION} || echo Tag already exists, skipping."
+                sh "git config user.email \"jenkins@ci.local\""
+                sh "git config user.name \"Jenkins CI\""
+                sh "git tag v${APP_VERSION} || echo 'Tag already exists, skipping.'"
 
-                echo "Release v${APP_VERSION} tagged in repository."
+                // Push tag to GitHub automatically
+                withCredentials([usernamePassword(
+                    credentialsId: 'GITHUB_CREDENTIALS',
+                    usernameVariable: 'GH_USER',
+                    passwordVariable: 'GH_TOKEN'
+                )]) {
+                    sh """
+                        git remote set-url origin https://${GH_USER}:${GH_TOKEN}@github.com/sonyrich/SIT753-ProPractIT-HD.git
+                        git push origin v${APP_VERSION} || echo 'Tag already pushed, skipping.'
+                    """
+                }
+
+                echo "Release v${APP_VERSION} tagged and pushed to GitHub."
                 echo "Promoting application to production on port ${APP_PORT}..."
                 echo "Environment config: .env.production (NODE_ENV=production, LOG_LEVEL=warn)"
 
-                bat "copy .env.production .env"
-                // Start the app in the background on production port
-                bat "set PORT=${APP_PORT} && start /B node src/app.js"
+                sh "cp .env.production .env"
+
+                // Tear down any existing production container (rollback safety)
+                sh "docker compose -f docker-compose.production.yml down || true"
+
+                // Deploy fresh production container
+                sh "docker compose -f docker-compose.production.yml up -d --build"
 
                 // Wait for the process to initialise
-                bat 'ping -n 8 127.0.0.1 > nul'
+                sh 'sleep 10'
 
                 // Health check against production port
-                bat "curl -s -o nul -w \"HTTP Status: %%{http_code}\" http://localhost:${APP_PORT}/health/ready"
+                sh "curl -s -o /dev/null -w 'HTTP Status: %{http_code}' http://localhost:${APP_PORT}/health/ready"
 
                 echo "Application live at: http://localhost:${APP_PORT}"
             }
             post {
-                success { echo "RELEASE STAGE: PASSED - v${APP_VERSION} deployed to production." }
+                success { echo "RELEASE STAGE: PASSED - v${APP_VERSION} tagged on GitHub and deployed to production." }
                 failure { echo "RELEASE STAGE: FAILED - Production deployment did not pass health check." }
             }
         }
@@ -193,17 +236,33 @@ pipeline {
                 echo "=== MONITORING AND ALERTING STAGE ==="
                 echo "Verifying production health metrics..."
 
-                bat "curl -s http://localhost:${APP_PORT}/health"
+                // Check 1: Basic health endpoint
+                sh "curl -sf http://localhost:${APP_PORT}/health || error('Health endpoint failed')"
 
-                echo "Health endpoint verified."
-                echo "Metrics exposed: uptime, memory usage, environment, task count."
-                echo "Monitoring tool: health endpoint polled by Jenkins post-deployment."
-                echo "Alert mechanism: pipeline post-failure block acts as alerting layer."
-                echo "For production: integrate Prometheus scraping http://localhost:${APP_PORT}/health and configure Grafana alert rules."
+                // Check 2: Readiness probe
+                sh "curl -sf http://localhost:${APP_PORT}/health/ready || error('Readiness probe failed')"
+
+                // Check 3: Parse and print live metrics
+                sh """
+                    echo '--- Live Metrics ---'
+                    curl -s http://localhost:${APP_PORT}/health | grep -E 'uptime|memory|status|tasks' || true
+                """
+
+                // Check 4: Incident simulation - verify 404 handling
+                sh """
+                    STATUS=\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:${APP_PORT}/nonexistent)
+                    echo "Incident simulation - 404 response: \$STATUS"
+                    if [ "\$STATUS" = "404" ]; then
+                        echo "ALERT CHECK PASSED: App correctly returned 404 - incident handling verified."
+                    fi
+                """
+
+                echo "Prometheus scrape target: http://localhost:${APP_PORT}/health"
+                echo "Recommended next step: Grafana alert rule on uptime drop or memory > 80%."
             }
             post {
-                success { echo "MONITORING STAGE: PASSED - Application metrics are accessible and reported." }
-                failure { echo "MONITORING STAGE: FAILED - Health endpoint did not respond." }
+                success { echo "MONITORING STAGE: PASSED - Live metrics verified, incident simulation complete." }
+                failure { echo "MONITORING STAGE: FAILED - Health endpoint did not respond. ALERT TRIGGERED." }
             }
         }
     }
