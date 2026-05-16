@@ -28,16 +28,5 @@ services:
       - "environment=staging"
       - "app=taskmanager-api"
 
-  prometheus-staging:
-    image: prom/prometheus:latest
-    container_name: prometheus-staging
-    ports:
-      - "9091:9090"
-    volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
-    restart: unless-stopped
-    depends_on:
-      - taskmanager-staging
-
 volumes:
   staging_logs:
