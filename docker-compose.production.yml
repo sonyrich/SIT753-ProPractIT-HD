@@ -34,12 +34,15 @@ services:
       - "app=taskmanager-api"
 
   prometheus:
-    image: prom/prometheus:latest
+    build:
+      context: ./config
+      dockerfile_inline: |
+        FROM prom/prometheus:latest
+        COPY prometheus.yml /etc/prometheus/prometheus.yml
     container_name: prometheus-prod
     ports:
       - "9090:9090"
     volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     restart: always
 
