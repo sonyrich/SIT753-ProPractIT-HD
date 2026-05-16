@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   taskmanager-prod:
     image: taskmanager-api:${IMAGE_TAG:-latest}
