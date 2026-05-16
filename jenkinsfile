@@ -105,18 +105,18 @@ pipeline {
                 echo "Running SonarCloud static analysis..."
 
                 withCredentials([string(credentialsId: 'SONARTOKEN', variable: 'SONAR_TOKEN')]) {
-                    sh """
+                    sh '''
                         sonar-scanner \\
-                            -Dsonar.projectKey=${SONAR_PROJECT} \\
-                            -Dsonar.organization=${SONAR_ORG} \\
+                            -Dsonar.projectKey=''' + SONAR_PROJECT + ''' \\
+                            -Dsonar.organization=''' + SONAR_ORG + ''' \\
                             -Dsonar.host.url=https://sonarcloud.io \\
                             -Dsonar.token=${SONAR_TOKEN} \\
-                            -Dsonar.projectVersion=${APP_VERSION} \\
+                            -Dsonar.projectVersion=''' + APP_VERSION + ''' \\
                             -Dsonar.sources=src \\
                             -Dsonar.tests=test \\
                             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
                             -Dsonar.exclusions=node_modules/**,coverage/**,logs/**
-                    """
+                    '''
                 }
 
                 echo "SonarCloud analysis submitted. View results at: https://sonarcloud.io/project/overview?id=${SONAR_PROJECT}"
